@@ -1,0 +1,26 @@
+# Core TTS libraries
+mlx-audio>=0.4.1
+snac>=1.2.1
+
+# MLX dependencies
+mlx>=0.25.2
+
+# Kokoro dependencies (must use specific version)
+misaki[en]<0.9
+phonemizer-fork>=3.3.2
+spacy>=3.8.0
+spacy-curated-transformers>=0.3.1
+num2words>=0.5.14
+espeakng-loader>=0.2.4
+
+# Ollama/Orpheus dependencies
+torch>=2.5.1
+requests>=2.32.5
+
+# Audio processing
+sounddevice>=0.5.3
+scipy>=1.17.1
+numpy>=1.26.4
+
+# Utilities
+tqdm>=4.67.1
