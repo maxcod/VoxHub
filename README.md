@@ -30,7 +30,7 @@ Local TTS abstraction layer supporting multiple backends for privacy-focused voi
 ### 1. Clone the repository
 ```bash
 git clone <your-repo-url>
-cd orpheus-tts
+cd VoxHub
 ```
 
 ### 2. Create virtual environment
@@ -62,69 +62,72 @@ python -m spacy download en_core_web_sm
 # Activate virtual environment
 source venv/bin/activate
 
-# Simple text-to-speech
+# Simple text-to-speech (uses orpheus model by default)
 python speak.py "Hello world"
 
-# Use MLX backend
-python speak.py --backend mlx "Hello world"
-
 # Use Kokoro model
-python speak.py -b mlx -m kokoro "Hello world"
+python speak.py -m kokoro "Hello world"
 
-# Use specific Kokoro voice
-python speak.py -b mlx -m kokoro -v af_bella "Hello world"
+# Use Kokoro with specific voice
+python speak.py -m kokoro -v af_bella "Hello world"
+
+# Use pocket-tts (fast, no voice selection)
+python speak.py -m pocket "Hello world"
 ```
 
 ### Read from File
 
 ```bash
 python speak.py --file input.txt
-python speak.py -b mlx -m kokoro -v af_nicole --file input.txt
+python speak.py -m kokoro -v af_nicole --file input.txt
 ```
 
 ### Save to File
 
 ```bash
 python speak.py "Your text" --save output.wav
-python speak.py -b mlx -m kokoro -v am_fenrir "Text" --save output.wav
+python speak.py -m kokoro -v am_fenrir "Text" --save output.wav
 ```
 
 ### All Options
 
 ```
 Options:
-  --file, -f <path>         Read text from file
-  --save, -s <path>         Save audio to WAV file
-  --backend, -b <name>      Backend: "ollama" or "mlx" (default: ollama)
-  --mlx-model, -m <name>    MLX model: "pocket" or "kokoro" (default: pocket)
-  --kokoro-voice, -v <name> Kokoro voice (default: af_heart)
-  --help, -h                Show help message
+  --file, -f <path>    Read text from file
+  --save, -s <path>    Save audio to WAV file
+  --model, -m <name>   Model: "orpheus", "pocket", or "kokoro" (default: orpheus)
+  --voice, -v <name>   Voice (model-specific)
+  --help, -h           Show help message
 ```
 
 ## Configuration
 
-Edit these variables in `speak.py`:
+Edit the `MODELS` dictionary in `speak.py` to modify default settings:
 
 ```python
-# Ollama settings
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "legraphista/Orpheus:3b-ft-q8"
-VOICE = "tara"
-
-# MLX settings
-DEFAULT_MLX_MODEL = "pocket"
-DEFAULT_KOKORO_VOICE = "af_heart"
+DEFAULT_MODEL = "orpheus"  # Default model: orpheus, pocket, or kokoro
+OLLAMA_URL = "http://localhost:11434/api/generate"  # Ollama server URL
 ```
 
 ## Features
 
-### Streaming Playback
-For texts > 100 characters, audio starts playing immediately while generation continues in the background.
+### Auto-Backend Selection
+Backend is automatically selected based on the model:
+- **orpheus** → Ollama backend (requires `ollama serve`)
+- **pocket** → MLX backend (Apple Silicon)
+- **kokoro** → MLX backend (Apple Silicon)
 
-### Multiple Backends
-Switch between Ollama and MLX backends depending on your needs:
-- **Ollama**: More voice options, requires Ollama server
-- **MLX**: Faster on Apple Silicon, local inference
+**Note:** On macOS with Apple Silicon, the MLX backend provides faster local inference.
+
+### Streaming Playback
+For texts > 100 characters, MLX models start playing audio immediately while generation continues.
+
+### Voice Selection
+- **orpheus**: 8 voices (tara, leah, jess, leo, dan, mia, zac, zoe)
+- **kokoro**: 4 voices (af_heart, af_bella, af_nicole, am_fenrir)
+- **pocket**: No voice selection
+
+Invalid voice selection shows available options automatically
 
 ## Requirements
 
@@ -134,6 +137,9 @@ Switch between Ollama and MLX backends depending on your needs:
 
 ## Troubleshooting
 
+### Invalid voice error
+If you see "Voice 'x' not available for model 'y'", the error message will list all available voices for that model.
+
 ### Kokoro "words count mismatch" warnings
 These warnings are harmless and don't affect audio quality. They indicate minor differences in tokenization.
 
@@ -142,6 +148,9 @@ Ensure you have sufficient disk space (~1-2GB per model) and a stable internet c
 
 ### Ollama connection errors
 Make sure Ollama is running: `ollama serve`
+
+### Invalid model error
+Available models: orpheus, pocket, kokoro. Backend is auto-selected based on model choice.
 
 ## License
 

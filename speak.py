@@ -22,28 +22,36 @@ from queue import Queue
 from scipy.io import wavfile
 
 # ── Config ───────────────────────────────────────────────────────────────────
-# Ollama/Orpheus settings
-OLLAMA_URL  = "http://localhost:11434/api/generate"
-MODEL       = "legraphista/Orpheus:3b-ft-q8"
-VOICE       = "tara"   # tara | leah | jess | leo | dan | mia | zac | zoe
-SAMPLE_RATE = 24000
-MAX_CHARS_PER_CHUNK = 300  # Split long texts into chunks of this size (reduced to avoid token limit)
-
-# MLX-Audio settings
-MLX_MODELS = {
-    "pocket": "mlx-community/pocket-tts-4bit",  # Fast, compact model
-    "kokoro": "mlx-community/Kokoro-82M-bf16",  # High-quality Kokoro model
+# Model definitions
+MODELS = {
+    "orpheus": {
+        "backend": "ollama",
+        "path": "legraphista/Orpheus:3b-ft-q8",
+        "voices": ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"],
+        "default_voice": "tara",
+        "sample_rate": 24000,
+    },
+    "pocket": {
+        "backend": "mlx",
+        "path": "mlx-community/pocket-tts-4bit",
+        "voices": [],  # No voice selection for pocket
+        "default_voice": None,
+        "sample_rate": 24000,
+    },
+    "kokoro": {
+        "backend": "mlx",
+        "path": "mlx-community/Kokoro-82M-bf16",
+        "voices": ["af_heart", "af_bella", "af_nicole", "am_fenrir"],
+        "default_voice": "af_heart",
+        "sample_rate": 24000,
+    },
 }
-DEFAULT_MLX_MODEL = "pocket"  # Default MLX model to use
 
-# Kokoro voice options
-KOKORO_VOICES = ["af_heart", "af_bella", "af_nicole", "am_fenrir"]
-DEFAULT_KOKORO_VOICE = "af_heart"
+DEFAULT_MODEL = "orpheus"
 
-MLX_SAMPLE_RATE = 24000
-
-# Default backend: "ollama" or "mlx"
-DEFAULT_BACKEND = "ollama"
+# Ollama settings
+OLLAMA_URL = "http://localhost:11434/api/generate"
+MAX_CHARS_PER_CHUNK = 300  # Split long texts into chunks of this size
 # ─────────────────────────────────────────────────────────────────────────────
 
 snac_model = None
@@ -56,28 +64,26 @@ def load_snac_model():
         snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
         print("ready.\n")
 
-def load_mlx_model(model_name: str = DEFAULT_MLX_MODEL):
+def load_mlx_model(model: str):
     """Load MLX-Audio model."""
     global mlx_models
-    if model_name not in mlx_models:
-        model_path = MLX_MODELS.get(model_name)
-        if not model_path:
-            raise ValueError(f"Unknown MLX model: {model_name}. Available: {list(MLX_MODELS.keys())}")
+    if model not in mlx_models:
+        model_path = MODELS[model]["path"]
         print(f"Loading MLX-Audio model ({model_path})...", end=" ", flush=True)
         from mlx_audio.tts import load
-        mlx_models[model_name] = load(model_path)
+        mlx_models[model] = load(model_path)
         print("ready.\n")
-    return mlx_models[model_name]
+    return mlx_models[model]
 
-def generate_audio_mlx(text: str, model_name: str = DEFAULT_MLX_MODEL, voice: str = None) -> np.ndarray | None:
+def generate_audio_mlx(text: str, model: str, voice: str = None) -> np.ndarray | None:
     """Generate audio using MLX-Audio backend."""
-    model = load_mlx_model(model_name)
+    mlx_model = load_mlx_model(model)
 
-    # Generate speech with voice parameter for Kokoro
-    if model_name == "kokoro" and voice:
-        audio = model.generate(text, voice=voice)
+    # Generate speech with voice parameter if voice is provided
+    if voice:
+        audio = mlx_model.generate(text, voice=voice)
     else:
-        audio = model.generate(text)
+        audio = mlx_model.generate(text)
 
     # Collect audio chunks from generator
     audio_chunks = []
@@ -169,7 +175,7 @@ def split_text_into_chunks(text: str, max_chars: int) -> list[str]:
 
     return chunks
 
-def speak_chunk(text: str, voice: str = VOICE, chunk_num: int = None, total_chunks: int = None):
+def speak_chunk(text: str, voice: str, model_path: str, sample_rate: int, chunk_num: int = None, total_chunks: int = None):
     """Speak a single chunk of text."""
     chunk_info = f" (chunk {chunk_num}/{total_chunks})" if chunk_num else ""
     preview = text[:50] + "..." if len(text) > 50 else text
@@ -178,7 +184,7 @@ def speak_chunk(text: str, voice: str = VOICE, chunk_num: int = None, total_chun
     prompt = format_prompt(voice, text)
 
     resp = requests.post(OLLAMA_URL, json={
-        "model": MODEL,
+        "model": model_path,
         "prompt": prompt,
         "stream": False,
         "raw": True,
@@ -206,14 +212,14 @@ def speak_chunk(text: str, voice: str = VOICE, chunk_num: int = None, total_chun
         print("⚠️  Token decoding produced no audio.")
         return
 
-    duration = len(waveform) / SAMPLE_RATE
+    duration = len(waveform) / sample_rate
     print(f"✅  Playing {duration:.1f}s of audio...")
-    sd.play(waveform, samplerate=SAMPLE_RATE)
+    sd.play(waveform, samplerate=sample_rate)
     time.sleep(duration + 0.1)
     sd.stop()
     print("   Done.\n")
 
-def generate_audio_for_chunk(text: str, voice: str, chunk_num: int, total_chunks: int) -> np.ndarray | None:
+def generate_audio_for_chunk(text: str, voice: str, model_path: str, sample_rate: int, chunk_num: int, total_chunks: int) -> np.ndarray | None:
     """Generate audio waveform for a chunk without playing it."""
     chunk_info = f" (chunk {chunk_num}/{total_chunks})" if chunk_num else ""
     preview = text[:50] + "..." if len(text) > 50 else text
@@ -222,7 +228,7 @@ def generate_audio_for_chunk(text: str, voice: str, chunk_num: int, total_chunks
     prompt = format_prompt(voice, text)
 
     resp = requests.post(OLLAMA_URL, json={
-        "model": MODEL,
+        "model": model_path,
         "prompt": prompt,
         "stream": False,
         "raw": True,
@@ -250,32 +256,35 @@ def generate_audio_for_chunk(text: str, voice: str, chunk_num: int, total_chunks
         print("⚠️  Token decoding produced no audio.")
         return None
 
-    print(f"   Generated waveform: {len(waveform)} samples ({len(waveform)/SAMPLE_RATE:.2f}s)")
+    print(f"   Generated waveform: {len(waveform)} samples ({len(waveform)/sample_rate:.2f}s)")
 
     return waveform
 
-def audio_generator_thread(chunks: list[str], voice: str, audio_queue: Queue):
+def audio_generator_thread(chunks: list[str], voice: str, model_path: str, sample_rate: int, audio_queue: Queue):
     """Thread function to generate audio chunks and put them in the queue."""
     for i, chunk in enumerate(chunks, 1):
-        waveform = generate_audio_for_chunk(chunk, voice, i, len(chunks))
+        waveform = generate_audio_for_chunk(chunk, voice, model_path, sample_rate, i, len(chunks))
         audio_queue.put(waveform)
     audio_queue.put(None)  # Signal completion
 
-def speak_mlx(text: str, model_name: str = DEFAULT_MLX_MODEL, voice: str = None, stream: bool = True):
+def speak_mlx(text: str, model: str, voice: str = None, stream: bool = True):
     """Speak text using MLX-Audio backend with optional streaming."""
     preview = text[:50] + "..." if len(text) > 50 else text
-    voice_info = f", voice: {voice}" if voice and model_name == "kokoro" else ""
-    print(f"🎤  '{preview}'  →  generating with MLX ({model_name}{voice_info})...", flush=True)
+    voice_info = f", voice: {voice}" if voice else ""
+    print(f"🎤  '{preview}'  →  generating with {model}{voice_info}...", flush=True)
+
+    # Get sample rate for this model
+    sample_rate = MODELS[model]["sample_rate"]
 
     # Use streaming for longer texts
     if stream and len(text) > 100:
-        model = load_mlx_model(model_name)
+        mlx_model = load_mlx_model(model)
 
-        # Generate speech with voice parameter for Kokoro
-        if model_name == "kokoro" and voice:
-            audio_gen = model.generate(text, voice=voice)
+        # Generate speech with voice parameter if provided
+        if voice:
+            audio_gen = mlx_model.generate(text, voice=voice)
         else:
-            audio_gen = model.generate(text)
+            audio_gen = mlx_model.generate(text)
 
         # Stream audio chunks as they're generated
         chunk_num = 0
@@ -287,31 +296,31 @@ def speak_mlx(text: str, model_name: str = DEFAULT_MLX_MODEL, voice: str = None,
             if chunk_audio.dtype != np.float32:
                 chunk_audio = chunk_audio.astype(np.float32)
 
-            duration = len(chunk_audio) / MLX_SAMPLE_RATE
+            duration = len(chunk_audio) / sample_rate
 
             if chunk_num == 1:
                 print(f"▶️  Streaming audio (chunk {chunk_num})...", flush=True)
 
             # Play this chunk
-            sd.play(chunk_audio, samplerate=MLX_SAMPLE_RATE)
+            sd.play(chunk_audio, samplerate=sample_rate)
             sd.wait()  # Wait for chunk to finish before playing next
 
         print(f"✅  Completed streaming {chunk_num} chunks.\n")
     else:
         # For short text, use the standard non-streaming approach
-        waveform = generate_audio_mlx(text, model_name, voice)
+        waveform = generate_audio_mlx(text, model, voice)
         if waveform is None or len(waveform) == 0:
             print("⚠️  Audio generation produced no output.")
             return
 
-        duration = len(waveform) / MLX_SAMPLE_RATE
+        duration = len(waveform) / sample_rate
         print(f"✅  Playing {duration:.1f}s of audio...")
-        sd.play(waveform, samplerate=MLX_SAMPLE_RATE)
+        sd.play(waveform, samplerate=sample_rate)
         time.sleep(duration + 0.1)
         sd.stop()
         print("   Done.\n")
 
-def generate_full_audio(text: str, voice: str = VOICE) -> np.ndarray | None:
+def generate_full_audio(text: str, voice: str, model_path: str, sample_rate: int) -> np.ndarray | None:
     """Generate complete audio for text, returning concatenated waveform."""
     load_snac_model()
 
@@ -325,7 +334,7 @@ def generate_full_audio(text: str, voice: str = VOICE) -> np.ndarray | None:
     # Generate all audio chunks
     all_waveforms = []
     for i, chunk in enumerate(chunks, 1):
-        waveform = generate_audio_for_chunk(chunk, voice, i, len(chunks))
+        waveform = generate_audio_for_chunk(chunk, voice, model_path, sample_rate, i, len(chunks))
         if waveform is not None:
             all_waveforms.append(waveform)
 
@@ -340,17 +349,18 @@ def generate_full_audio(text: str, voice: str = VOICE) -> np.ndarray | None:
 
     return combined_waveform
 
-def save_audio_mlx(text: str, output_path: str, model_name: str = DEFAULT_MLX_MODEL, voice: str = None):
+def save_audio_mlx(text: str, output_path: str, model: str, voice: str = None):
     """Generate audio using MLX and save to WAV file."""
-    voice_info = f", voice: {voice}" if voice and model_name == "kokoro" else ""
-    print(f"🎤  Generating audio with MLX ({model_name}{voice_info})...", flush=True)
-    waveform = generate_audio_mlx(text, model_name, voice)
+    voice_info = f", voice: {voice}" if voice else ""
+    print(f"🎤  Generating audio with {model}{voice_info}...", flush=True)
+    waveform = generate_audio_mlx(text, model, voice)
 
     if waveform is None:
         print("⚠️  No audio generated.")
         return
 
-    total_duration = len(waveform) / MLX_SAMPLE_RATE
+    sample_rate = MODELS[model]["sample_rate"]
+    total_duration = len(waveform) / sample_rate
     print(f"💾 Saving {total_duration:.1f}s of audio to {output_path}...")
 
     # Debug: check waveform stats
@@ -359,22 +369,50 @@ def save_audio_mlx(text: str, output_path: str, model_name: str = DEFAULT_MLX_MO
 
     # Convert to int16 for WAV format
     audio_int16 = np.clip(waveform * 32767, -32768, 32767).astype(np.int16)
-    wavfile.write(output_path, MLX_SAMPLE_RATE, audio_int16)
+    wavfile.write(output_path, sample_rate, audio_int16)
 
     print(f"✅ Audio saved successfully!\n")
 
-def save_audio(text: str, output_path: str, voice: str = VOICE, backend: str = DEFAULT_BACKEND, mlx_model: str = DEFAULT_MLX_MODEL, kokoro_voice: str = None):
+def save_audio(text: str, output_path: str, model: str = DEFAULT_MODEL, voice: str = None):
     """Generate audio and save to WAV file."""
+    # Validate model
+    if model not in MODELS:
+        print(f"❌ Invalid model: {model}")
+        print(f"Available models: {', '.join(MODELS.keys())}")
+        sys.exit(1)
+
+    model_config = MODELS[model]
+    backend = model_config["backend"]
+
+    # Validate and set voice
+    if voice:
+        if not model_config["voices"]:
+            # Model doesn't support voice selection
+            print(f"❌ Voice '{voice}' not available for model '{model}'")
+            print(f"Model '{model}' does not support voice selection")
+            sys.exit(1)
+        elif voice not in model_config["voices"]:
+            # Invalid voice for this model
+            print(f"❌ Voice '{voice}' not available for model '{model}'")
+            print(f"Available voices: {', '.join(model_config['voices'])}")
+            sys.exit(1)
+    else:
+        voice = model_config["default_voice"]
+
+    # Route to appropriate backend
     if backend == "mlx":
-        save_audio_mlx(text, output_path, mlx_model, kokoro_voice)
+        save_audio_mlx(text, output_path, model, voice)
         return
 
-    combined_waveform = generate_full_audio(text, voice)
+    # Get model path and sample rate for Ollama backend
+    model_path = model_config["path"]
+    sample_rate = model_config["sample_rate"]
+
+    combined_waveform = generate_full_audio(text, voice, model_path, sample_rate)
 
     if combined_waveform is None:
         return
-
-    total_duration = len(combined_waveform) / SAMPLE_RATE
+    total_duration = len(combined_waveform) / sample_rate
     print(f"💾 Saving {total_duration:.1f}s of audio to {output_path}...")
 
     # Debug: check waveform stats
@@ -384,22 +422,50 @@ def save_audio(text: str, output_path: str, voice: str = VOICE, backend: str = D
     # Convert to int16 for WAV format
     # Ensure proper clipping to avoid overflow
     audio_int16 = np.clip(combined_waveform * 32767, -32768, 32767).astype(np.int16)
-    wavfile.write(output_path, SAMPLE_RATE, audio_int16)
+    wavfile.write(output_path, sample_rate, audio_int16)
 
     print(f"✅ Audio saved successfully!\n")
 
-def speak(text: str, voice: str = VOICE, backend: str = DEFAULT_BACKEND, mlx_model: str = DEFAULT_MLX_MODEL, kokoro_voice: str = None):
+def speak(text: str, model: str = DEFAULT_MODEL, voice: str = None):
     """Speak text, splitting into chunks if necessary."""
-    # Route to MLX backend if specified
+    # Validate model
+    if model not in MODELS:
+        print(f"❌ Invalid model: {model}")
+        print(f"Available models: {', '.join(MODELS.keys())}")
+        sys.exit(1)
+
+    model_config = MODELS[model]
+    backend = model_config["backend"]
+
+    # Validate and set voice
+    if voice:
+        if not model_config["voices"]:
+            # Model doesn't support voice selection
+            print(f"❌ Voice '{voice}' not available for model '{model}'")
+            print(f"Model '{model}' does not support voice selection")
+            sys.exit(1)
+        elif voice not in model_config["voices"]:
+            # Invalid voice for this model
+            print(f"❌ Voice '{voice}' not available for model '{model}'")
+            print(f"Available voices: {', '.join(model_config['voices'])}")
+            sys.exit(1)
+    else:
+        voice = model_config["default_voice"]
+
+    # Route to appropriate backend
     if backend == "mlx":
-        speak_mlx(text, mlx_model, kokoro_voice)
+        speak_mlx(text, model, voice)
         return
 
     load_snac_model()
 
+    # Get model path and sample rate for Ollama backend
+    model_path = model_config["path"]
+    sample_rate = model_config["sample_rate"]
+
     # If text is short enough, speak it directly
     if len(text) <= MAX_CHARS_PER_CHUNK:
-        speak_chunk(text, voice)
+        speak_chunk(text, voice, model_path, sample_rate)
     else:
         # Split into chunks and process them with continuous playback
         chunks = split_text_into_chunks(text, MAX_CHARS_PER_CHUNK)
@@ -409,7 +475,7 @@ def speak(text: str, voice: str = VOICE, backend: str = DEFAULT_BACKEND, mlx_mod
         audio_queue = Queue(maxsize=2)  # Buffer up to 2 chunks ahead
 
         # Start generation thread
-        generator = Thread(target=audio_generator_thread, args=(chunks, voice, audio_queue))
+        generator = Thread(target=audio_generator_thread, args=(chunks, voice, model_path, sample_rate, audio_queue))
         generator.start()
 
         # Play audio chunks as they become available
@@ -419,14 +485,14 @@ def speak(text: str, voice: str = VOICE, backend: str = DEFAULT_BACKEND, mlx_mod
             if waveform is None:  # End signal
                 break
             chunk_num += 1
-            duration = len(waveform) / SAMPLE_RATE
+            duration = len(waveform) / sample_rate
             print(f"▶️  Playing chunk {chunk_num}/{len(chunks)} ({duration:.1f}s)...")
 
             # Stop any previous playback to ensure clean state
             sd.stop()
 
             # Play the chunk
-            sd.play(waveform, samplerate=SAMPLE_RATE)
+            sd.play(waveform, samplerate=sample_rate)
 
             # Wait for playback to complete using the actual duration
             # Add a small buffer to ensure complete playback
@@ -441,61 +507,51 @@ def speak(text: str, voice: str = VOICE, backend: str = DEFAULT_BACKEND, mlx_mod
         print("✅ All chunks completed!")
 
 def show_help():
-    print("""
-Orpheus TTS — Text-to-speech with multiple backends
+    # Build model info dynamically
+    model_lines = []
+    for model_name, config in MODELS.items():
+        backend_tag = f"[{config['backend']}]"
+        voices_info = f" - Voices: {', '.join(config['voices'])}" if config['voices'] else ""
+        model_lines.append(f"    {model_name:8} {backend_tag:9} {config['path']}{voices_info}")
+
+    models_str = '\n'.join(model_lines)
+
+    print(f"""
+VoxHub — Local TTS with multiple model support
 
 Usage:
-  python speak.py "Your text here"                  Speak the provided text
-  python speak.py --file <path>                     Read and speak from a text file
-  python speak.py -f <path>                         Short form of --file
-  python speak.py --file <path> --save <output.wav> Generate and save to WAV file
-  python speak.py "text" --save <output.wav>        Generate from text and save
-  python speak.py --backend mlx "Hello world"       Use MLX-Audio backend
-  python speak.py                                   Enter interactive mode
-  python speak.py --help                            Show this help message
+  python speak.py "Your text here"                      Speak with default model (orpheus)
+  python speak.py -m kokoro "Hello world"               Use Kokoro model
+  python speak.py -m kokoro -v af_bella "Hello"         Use Kokoro with specific voice
+  python speak.py -m pocket "Fast generation"           Use pocket-tts model
+  python speak.py --file input.txt                      Read and speak from file
+  python speak.py --file input.txt --save output.wav    Generate and save to WAV
+  python speak.py                                       Enter interactive mode
+  python speak.py --help                                Show this help message
 
 Options:
-  --file, -f <path>         Read text from the specified file
-  --save, -s <path>         Save audio to WAV file instead of playing
-  --backend, -b <name>      Backend to use: "ollama" or "mlx" (default: {BACKEND})
-  --mlx-model, -m <name>    MLX model: "pocket" or "kokoro" (default: {DEFAULT_MLX_MODEL})
-  --kokoro-voice, -v <name> Kokoro voice: "af_heart", "af_bella", "af_nicole", "am_fenrir" (default: {DEFAULT_KOKORO_VOICE})
-  --help, -h                Show this help message and exit
+  --file, -f <path>    Read text from the specified file
+  --save, -s <path>    Save audio to WAV file instead of playing
+  --model, -m <name>   Model to use (default: {DEFAULT_MODEL})
+  --voice, -v <name>   Voice to use (model-specific)
+  --help, -h           Show this help message and exit
 
-Configuration (Ollama backend):
-  Voice: {VOICE}
-  Model: {MODEL}
-  Sample Rate: {SAMPLE_RATE} Hz
-  Ollama URL: {OLLAMA_URL}
-  Max Chunk Size: {MAX_CHARS} characters
-
-Configuration (MLX backend):
-  Default Model: {DEFAULT_MLX_MODEL}
-  Available Models:
-    - pocket: {POCKET_MODEL} (fast, compact)
-    - kokoro: {KOKORO_MODEL} (high-quality)
-  Kokoro Voices: {KOKORO_VOICES_STR}
-  Default Kokoro Voice: {DEFAULT_KOKORO_VOICE}
-  Sample Rate: {MLX_SAMPLE_RATE} Hz
-
-Available voices (Ollama only):
-  tara, leah, jess, leo, dan, mia, zac, zoe
+Available Models:
+{models_str}
 
 Notes:
-  - Ollama backend: Long texts are split into chunks, streamed playback
-  - MLX backend: Fast local inference using Apple Silicon, streaming playback
-  - MLX streaming: Audio starts playing immediately for texts > 100 chars
-  - Kokoro voices: Use --kokoro-voice to select (only works with kokoro model)
-  - Saved audio is in WAV format, 16-bit PCM
-  - To change settings, edit the config variables in the script
-""".format(VOICE=VOICE, MODEL=MODEL, SAMPLE_RATE=SAMPLE_RATE, OLLAMA_URL=OLLAMA_URL,
-           MAX_CHARS=MAX_CHARS_PER_CHUNK, DEFAULT_MLX_MODEL=DEFAULT_MLX_MODEL,
-           POCKET_MODEL=MLX_MODELS["pocket"], KOKORO_MODEL=MLX_MODELS["kokoro"],
-           KOKORO_VOICES_STR=", ".join(KOKORO_VOICES), DEFAULT_KOKORO_VOICE=DEFAULT_KOKORO_VOICE,
-           MLX_SAMPLE_RATE=MLX_SAMPLE_RATE, BACKEND=DEFAULT_BACKEND))
+  - Backend (Ollama/MLX) is auto-selected based on model
+  - Orpheus uses Ollama backend (requires: ollama serve)
+  - Pocket and Kokoro use MLX backend (Apple Silicon optimized)
+  - Streaming playback: Audio starts immediately for texts > 100 chars
+  - Voice selection available for: orpheus, kokoro
+  - Invalid voice shows available options
+  - Saved audio: WAV format, 16-bit PCM, 24kHz
+""")
 
 def interactive_loop():
-    print(f"🔊  Orpheus TTS  |  voice: {VOICE}  |  model: {MODEL}")
+    default_config = MODELS[DEFAULT_MODEL]
+    print(f"🔊  VoxHub  |  model: {DEFAULT_MODEL}  |  backend: {default_config['backend']}")
     print("    Type text and press Enter. Ctrl+C to quit.\n")
     while True:
         try:
@@ -516,9 +572,8 @@ if __name__ == "__main__":
         # Parse arguments
         input_text = None
         output_file = None
-        backend = DEFAULT_BACKEND
-        mlx_model = DEFAULT_MLX_MODEL
-        kokoro_voice = DEFAULT_KOKORO_VOICE
+        model = DEFAULT_MODEL
+        voice = None
         text_parts = []
         i = 1
 
@@ -543,28 +598,14 @@ if __name__ == "__main__":
                 output_file = sys.argv[i + 1]
                 i += 2
 
-            elif arg in ("--backend", "-b") and i + 1 < len(sys.argv):
-                # Set backend
-                backend = sys.argv[i + 1].lower()
-                if backend not in ("ollama", "mlx"):
-                    print(f"❌ Invalid backend: {backend}. Must be 'ollama' or 'mlx'")
-                    sys.exit(1)
+            elif arg in ("--model", "-m") and i + 1 < len(sys.argv):
+                # Set model
+                model = sys.argv[i + 1].lower()
                 i += 2
 
-            elif arg in ("--mlx-model", "-m") and i + 1 < len(sys.argv):
-                # Set MLX model
-                mlx_model = sys.argv[i + 1].lower()
-                if mlx_model not in MLX_MODELS:
-                    print(f"❌ Invalid MLX model: {mlx_model}. Available: {list(MLX_MODELS.keys())}")
-                    sys.exit(1)
-                i += 2
-
-            elif arg in ("--kokoro-voice", "-v") and i + 1 < len(sys.argv):
-                # Set Kokoro voice
-                kokoro_voice = sys.argv[i + 1].lower()
-                if kokoro_voice not in KOKORO_VOICES:
-                    print(f"❌ Invalid Kokoro voice: {kokoro_voice}. Available: {KOKORO_VOICES}")
-                    sys.exit(1)
+            elif arg in ("--voice", "-v") and i + 1 < len(sys.argv):
+                # Set voice
+                voice = sys.argv[i + 1].lower()
                 i += 2
 
             else:
@@ -580,9 +621,9 @@ if __name__ == "__main__":
         # Execute based on parsed arguments
         if input_text:
             if output_file:
-                save_audio(input_text, output_file, backend=backend, mlx_model=mlx_model, kokoro_voice=kokoro_voice)
+                save_audio(input_text, output_file, model=model, voice=voice)
             else:
-                speak(input_text, backend=backend, mlx_model=mlx_model, kokoro_voice=kokoro_voice)
+                speak(input_text, model=model, voice=voice)
         else:
             print("❌ No text provided")
             sys.exit(1)
