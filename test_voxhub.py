@@ -218,15 +218,15 @@ def test_kokoro_voice_selection():
 
 
 def test_invalid_voice_kokoro():
-    """Test invalid voice for kokoro shows available voices"""
+    """Test invalid voice for kokoro shows error from model"""
     result = run_command(["-m", "kokoro", "-v", "invalid_voice", "test"])
 
     if result.returncode != 0:
         output = result.stdout + result.stderr
-        if "not available" in output and "af_heart" in output:
+        if "invalid voice" in output.lower() or "invalid_voice" in output:
             results.add_pass("Voice: Invalid kokoro voice error")
         else:
-            results.add_fail("Voice: Invalid kokoro voice error", "Missing voice list")
+            results.add_fail("Voice: Invalid kokoro voice error", "Missing error message")
     else:
         results.add_fail("Voice: Invalid kokoro voice error", "Should have failed")
 

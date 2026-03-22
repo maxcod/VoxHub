@@ -27,27 +27,24 @@ MODELS = {
     "orpheus": {
         "backend": "ollama",
         "path": "legraphista/Orpheus:3b-ft-q8",
-        "voices": ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"],
         "default_voice": "tara",
         "sample_rate": 24000,
     },
     "pocket": {
         "backend": "mlx",
         "path": "mlx-community/pocket-tts-4bit",
-        "voices": [],  # No voice selection for pocket
-        "default_voice": None,
+        "default_voice": None,  # No voice selection supported
         "sample_rate": 24000,
     },
     "kokoro": {
         "backend": "mlx",
         "path": "mlx-community/Kokoro-82M-bf16",
-        "voices": ["af_heart", "af_bella", "af_nicole", "am_fenrir"],
         "default_voice": "af_heart",
         "sample_rate": 24000,
     },
 }
 
-DEFAULT_MODEL = "orpheus"
+DEFAULT_MODEL = "kokoro"
 
 # Ollama settings
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -79,31 +76,41 @@ def generate_audio_mlx(text: str, model: str, voice: str = None) -> np.ndarray |
     """Generate audio using MLX-Audio backend."""
     mlx_model = load_mlx_model(model)
 
-    # Generate speech with voice parameter if voice is provided
-    if voice:
-        audio = mlx_model.generate(text, voice=voice)
-    else:
-        audio = mlx_model.generate(text)
+    try:
+        # Generate speech with voice parameter if voice is provided
+        if voice:
+            audio = mlx_model.generate(text, voice=voice)
+        else:
+            audio = mlx_model.generate(text)
 
-    # Collect audio chunks from generator
-    audio_chunks = []
-    sample_rate = None
+        # Collect audio chunks from generator
+        audio_chunks = []
+        sample_rate = None
 
-    for result in audio:
-        audio_chunks.append(np.array(result.audio))
-        sample_rate = result.sample_rate
+        for result in audio:
+            audio_chunks.append(np.array(result.audio))
+            sample_rate = result.sample_rate
 
-    if not audio_chunks:
-        return None
+        if not audio_chunks:
+            return None
 
-    # Combine all audio chunks
-    audio_array = np.concatenate(audio_chunks)
+        # Combine all audio chunks
+        audio_array = np.concatenate(audio_chunks)
 
-    # Ensure float32 in range [-1, 1]
-    if audio_array.dtype != np.float32:
-        audio_array = audio_array.astype(np.float32)
+        # Ensure float32 in range [-1, 1]
+        if audio_array.dtype != np.float32:
+            audio_array = audio_array.astype(np.float32)
 
-    return audio_array
+        return audio_array
+    except Exception as e:
+        error_msg = str(e)
+        # Check for voice-related errors
+        if voice and ("voice" in error_msg.lower() or "speaker" in error_msg.lower()):
+            print(f"❌ Invalid voice '{voice}' for model '{model}'")
+            print(f"Error: {error_msg}")
+            sys.exit(1)
+        # Re-raise other errors
+        raise
 
 def format_prompt(voice: str, text: str) -> str:
     return f"<custom_token_3><|begin_of_text|>{voice}: {text}<|eot_id|><custom_token_4><custom_token_5><custom_token_1>"
@@ -280,32 +287,42 @@ def speak_mlx(text: str, model: str, voice: str = None, stream: bool = True):
     if stream and len(text) > 100:
         mlx_model = load_mlx_model(model)
 
-        # Generate speech with voice parameter if provided
-        if voice:
-            audio_gen = mlx_model.generate(text, voice=voice)
-        else:
-            audio_gen = mlx_model.generate(text)
+        try:
+            # Generate speech with voice parameter if provided
+            if voice:
+                audio_gen = mlx_model.generate(text, voice=voice)
+            else:
+                audio_gen = mlx_model.generate(text)
 
-        # Stream audio chunks as they're generated
-        chunk_num = 0
-        for result in audio_gen:
-            chunk_num += 1
-            chunk_audio = np.array(result.audio)
+            # Stream audio chunks as they're generated
+            chunk_num = 0
+            for result in audio_gen:
+                chunk_num += 1
+                chunk_audio = np.array(result.audio)
 
-            # Ensure float32
-            if chunk_audio.dtype != np.float32:
-                chunk_audio = chunk_audio.astype(np.float32)
+                # Ensure float32
+                if chunk_audio.dtype != np.float32:
+                    chunk_audio = chunk_audio.astype(np.float32)
 
-            duration = len(chunk_audio) / sample_rate
+                duration = len(chunk_audio) / sample_rate
 
-            if chunk_num == 1:
-                print(f"▶️  Streaming audio (chunk {chunk_num})...", flush=True)
+                if chunk_num == 1:
+                    print(f"▶️  Streaming audio (chunk {chunk_num})...", flush=True)
 
-            # Play this chunk
-            sd.play(chunk_audio, samplerate=sample_rate)
-            sd.wait()  # Wait for chunk to finish before playing next
+                # Play this chunk
+                sd.play(chunk_audio, samplerate=sample_rate)
+                sd.wait()  # Wait for chunk to finish before playing next
 
-        print(f"✅  Completed streaming {chunk_num} chunks.\n")
+            print(f"✅  Completed streaming {chunk_num} chunks.\n")
+        except Exception as e:
+            error_msg = str(e)
+            # Check for voice-related errors
+            if voice and ("voice" in error_msg.lower() or "speaker" in error_msg.lower()):
+                print(f"❌ Invalid voice '{voice}' for model '{model}'")
+                print(f"Error: {error_msg}")
+                sys.exit(1)
+            # Re-raise other errors
+            raise
     else:
         # For short text, use the standard non-streaming approach
         waveform = generate_audio_mlx(text, model, voice)
@@ -386,16 +403,11 @@ def save_audio(text: str, output_path: str, model: str = DEFAULT_MODEL, voice: s
 
     # Validate and set voice
     if voice:
-        if not model_config["voices"]:
+        if model_config["default_voice"] is None:
             # Model doesn't support voice selection
-            print(f"❌ Voice '{voice}' not available for model '{model}'")
-            print(f"Model '{model}' does not support voice selection")
+            print(f"❌ Model '{model}' does not support voice selection")
             sys.exit(1)
-        elif voice not in model_config["voices"]:
-            # Invalid voice for this model
-            print(f"❌ Voice '{voice}' not available for model '{model}'")
-            print(f"Available voices: {', '.join(model_config['voices'])}")
-            sys.exit(1)
+        # Otherwise let the model validate the voice itself
     else:
         voice = model_config["default_voice"]
 
@@ -439,16 +451,11 @@ def speak(text: str, model: str = DEFAULT_MODEL, voice: str = None):
 
     # Validate and set voice
     if voice:
-        if not model_config["voices"]:
+        if model_config["default_voice"] is None:
             # Model doesn't support voice selection
-            print(f"❌ Voice '{voice}' not available for model '{model}'")
-            print(f"Model '{model}' does not support voice selection")
+            print(f"❌ Model '{model}' does not support voice selection")
             sys.exit(1)
-        elif voice not in model_config["voices"]:
-            # Invalid voice for this model
-            print(f"❌ Voice '{voice}' not available for model '{model}'")
-            print(f"Available voices: {', '.join(model_config['voices'])}")
-            sys.exit(1)
+        # Otherwise let the model validate the voice itself
     else:
         voice = model_config["default_voice"]
 
@@ -511,7 +518,7 @@ def show_help():
     model_lines = []
     for model_name, config in MODELS.items():
         backend_tag = f"[{config['backend']}]"
-        voices_info = f" - Voices: {', '.join(config['voices'])}" if config['voices'] else ""
+        voices_info = " - supports voice selection" if config['default_voice'] is not None else ""
         model_lines.append(f"    {model_name:8} {backend_tag:9} {config['path']}{voices_info}")
 
     models_str = '\n'.join(model_lines)
@@ -520,9 +527,9 @@ def show_help():
 VoxHub — Local TTS with multiple model support
 
 Usage:
-  python speak.py "Your text here"                      Speak with default model (orpheus)
-  python speak.py -m kokoro "Hello world"               Use Kokoro model
-  python speak.py -m kokoro -v af_bella "Hello"         Use Kokoro with specific voice
+  python speak.py "Your text here"                      Speak with default model (kokoro)
+  python speak.py -v af_bella "Hello"                   Use Kokoro with specific voice
+  python speak.py -m orpheus "Hello world"              Use Orpheus model
   python speak.py -m pocket "Fast generation"           Use pocket-tts model
   python speak.py --file input.txt                      Read and speak from file
   python speak.py --file input.txt --save output.wav    Generate and save to WAV
@@ -544,8 +551,7 @@ Notes:
   - Orpheus uses Ollama backend (requires: ollama serve)
   - Pocket and Kokoro use MLX backend (Apple Silicon optimized)
   - Streaming playback: Audio starts immediately for texts > 100 chars
-  - Voice selection available for: orpheus, kokoro
-  - Invalid voice shows available options
+  - Voice selection: Models validate voices (see model docs for available voices)
   - Saved audio: WAV format, 16-bit PCM, 24kHz
 """)
 

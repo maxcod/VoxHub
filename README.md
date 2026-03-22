@@ -12,18 +12,30 @@ Local TTS abstraction layer supporting multiple backends for privacy-focused voi
 
 ## Supported Models
 
-### Ollama Backend
-- Model: `legraphista/Orpheus:3b-ft-q8`
-- Voices: tara, leah, jess, leo, dan, mia, zac, zoe
-- Features: Multi-voice, chunked processing
+### Orpheus (Ollama Backend)
+- **Model**: `legraphista/Orpheus:3b-ft-q8`
+- **Backend**: Ollama (requires `ollama serve`)
+- **Voices**: tara, leah, jess, leo, dan, mia, zac, zoe
+- **Features**: Multi-voice support, chunked processing for long texts
+- **Best for**: When Ollama is already running, or when you need Orpheus-specific voices
 
-### MLX Backend (Apple Silicon)
-- **pocket-tts-4bit**: Fast, compact model
-- **Kokoro-82M-bf16**: High-quality model with 4 voices:
+### Kokoro (MLX Backend - Apple Silicon)
+- **Model**: `mlx-community/Kokoro-82M-bf16`
+- **Backend**: MLX-Audio (Apple Silicon optimized)
+- **Voices**:
   - `af_heart` (female, default)
   - `af_bella` (female)
   - `af_nicole` (female)
   - `am_fenrir` (male)
+- **Features**: High-quality synthesis (82M parameters), streaming playback
+- **Best for**: High-quality output with voice selection on Apple Silicon
+
+### Pocket TTS (MLX Backend - Apple Silicon)
+- **Model**: `mlx-community/pocket-tts-4bit`
+- **Backend**: MLX-Audio (Apple Silicon optimized)
+- **Voices**: None (no voice selection)
+- **Features**: Fast generation, compact 4-bit quantized model
+- **Best for**: Quick generation, when voice selection isn't needed
 
 ## Installation
 
@@ -62,14 +74,14 @@ python -m spacy download en_core_web_sm
 # Activate virtual environment
 source venv/bin/activate
 
-# Simple text-to-speech (uses orpheus model by default)
+# Simple text-to-speech (uses kokoro model by default)
 python speak.py "Hello world"
 
-# Use Kokoro model
-python speak.py -m kokoro "Hello world"
-
 # Use Kokoro with specific voice
-python speak.py -m kokoro -v af_bella "Hello world"
+python speak.py -v af_bella "Hello world"
+
+# Use Orpheus model
+python speak.py -m orpheus "Hello world"
 
 # Use pocket-tts (fast, no voice selection)
 python speak.py -m pocket "Hello world"
@@ -95,7 +107,7 @@ python speak.py -m kokoro -v am_fenrir "Text" --save output.wav
 Options:
   --file, -f <path>    Read text from file
   --save, -s <path>    Save audio to WAV file
-  --model, -m <name>   Model: "orpheus", "pocket", or "kokoro" (default: orpheus)
+  --model, -m <name>   Model: "orpheus", "pocket", or "kokoro" (default: kokoro)
   --voice, -v <name>   Voice (model-specific)
   --help, -h           Show help message
 ```
@@ -105,7 +117,7 @@ Options:
 Edit the `MODELS` dictionary in `speak.py` to modify default settings:
 
 ```python
-DEFAULT_MODEL = "orpheus"  # Default model: orpheus, pocket, or kokoro
+DEFAULT_MODEL = "kokoro"  # Default model: orpheus, pocket, or kokoro
 OLLAMA_URL = "http://localhost:11434/api/generate"  # Ollama server URL
 ```
 
