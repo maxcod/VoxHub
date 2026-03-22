@@ -69,6 +69,22 @@ def load_mlx_model(model: str):
         print(f"Loading MLX-Audio model ({model_path})...", end=" ", flush=True)
         from mlx_audio.tts import load
         mlx_models[model] = load(model_path)
+
+        # Warm up the model with dummy generations to initialize pipeline
+        # This makes subsequent calls much faster (2s -> 60ms)
+        default_voice = MODELS[model]["default_voice"]
+        if default_voice:
+            # Do 2 warmup generations - first initializes, second caches
+            for _ in mlx_models[model].generate(".", voice=default_voice):
+                pass
+            for _ in mlx_models[model].generate(".", voice=default_voice):
+                pass
+        else:
+            for _ in mlx_models[model].generate("."):
+                pass
+            for _ in mlx_models[model].generate("."):
+                pass
+
         print("ready.\n")
     return mlx_models[model]
 
