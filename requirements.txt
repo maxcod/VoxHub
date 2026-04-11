@@ -24,3 +24,8 @@ numpy>=1.26.4
 
 # Utilities
 tqdm>=4.67.1
+
+# Speech-to-Text (Whisper)
+mlx-whisper>=0.4.0
+soundfile>=0.12.1  # For audio file I/O
+webrtcvad>=2.0.10  # Voice activity detection

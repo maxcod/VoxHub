@@ -1,14 +1,24 @@
 # VoxHub
 
-Local TTS abstraction layer supporting multiple backends for privacy-focused voice synthesis.
+Local TTS (text-to-speech) and STT (speech-to-text) hub supporting multiple backends for privacy-focused audio processing.
 
 ## Features
 
+### Text-to-Speech (TTS)
 - **Multiple Backends**: Ollama (Orpheus) and MLX-Audio (pocket-tts, Kokoro)
 - **Voice Selection**: 8 Ollama voices + 4 Kokoro voices
 - **Streaming Playback**: Audio starts playing immediately for long texts
 - **File Export**: Save to WAV format
-- **Local Inference**: All processing happens on your machine
+
+### Speech-to-Text (STT)
+- **Whisper Models**: Multiple sizes from tiny to large (MLX optimized)
+- **Live Recording**: Record from microphone and transcribe
+- **File Transcription**: Support for WAV, MP3, FLAC, OGG, and more
+- **Language Detection**: Auto-detect or specify source language
+
+### General
+- **Local Inference**: All processing happens on your machine (100% private)
+- **Model Caching**: Models loaded once and stay in memory
 
 ## Supported Models
 
@@ -111,6 +121,78 @@ Options:
   --voice, -v <name>   Voice (model-specific)
   --help, -h           Show help message
 ```
+
+## Speech-to-Text Usage
+
+### Transcribe Audio File
+
+```bash
+# Transcribe any audio file
+python listen.py --file audio.mp3
+
+# Use different model
+python listen.py -f audio.wav -m large
+
+# Specify language
+python listen.py -f audio.wav -l es  # Spanish
+```
+
+### Record from Microphone
+
+```bash
+# Record 10 seconds and transcribe
+python listen.py --record 10
+
+# Record and save transcription
+python listen.py -r 5 --save transcript.txt
+```
+
+### Continuous Listening Mode
+
+```bash
+# Continuous listening with voice activity detection
+python listen.py --continuous
+
+# Adjust silence timeout (default: 2.0 seconds)
+python listen.py -c --silence-timeout 3
+
+# Adjust VAD sensitivity (0=least, 3=most aggressive, default: 2)
+python listen.py -c --vad-level 3
+
+# Use different model and language
+python listen.py -c -m large -l en
+```
+
+**How it works:**
+- Listens continuously from your microphone
+- Detects when you start speaking (voice activity detection)
+- Buffers audio while you speak
+- Transcribes after detecting silence (default: 2 seconds)
+- Displays transcription and continues listening
+- Stop with Ctrl+C
+
+### STT Options
+
+```
+Options:
+  --file, -f <path>         Audio file to transcribe (WAV, MP3, FLAC, OGG, etc.)
+  --record, -r <seconds>    Record from microphone for N seconds
+  --continuous, -c          Continuous listening mode with voice activity detection
+  --silence-timeout <secs>  Seconds of silence before transcribing (default: 2.0, requires --continuous)
+  --vad-level <0-3>         VAD sensitivity: 0=least, 3=most aggressive (default: 2, requires --continuous)
+  --save, -s <path>         Save transcription to text file (not compatible with --continuous)
+  --model, -m <name>        Whisper model: tiny, base, small, medium, large, turbo (default: turbo)
+  --language, -l <code>     Source language code (e.g., en, es, fr) - auto-detect if not specified
+  --help, -h                Show help message
+```
+
+**Available Whisper Models:**
+- `tiny` - Fastest, least accurate (~40MB)
+- `base` - Fast, good for simple audio (~75MB)
+- `small` - Balanced speed/accuracy (~250MB)
+- `medium` - High accuracy (~770MB)
+- `large` - Highest accuracy (~1.5GB)
+- `turbo` - **Recommended** - Fast large model optimized for speed (~800MB)
 
 ## Configuration
 
